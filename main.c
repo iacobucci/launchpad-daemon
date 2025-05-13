@@ -100,7 +100,8 @@ int main(int argc, char *argv[]) {
 				// (0x90) I Launchpad spesso usano il canale 0 (indice 0) per i
 				// pad principali. Potrebbe essere necessario adattare il canale
 				// (0x90 - 0x9F)
-				if ((status_byte & 0xF0) == 0x90 || (status_byte & 0xF0) == 0xB0) { // Note On
+				if ((status_byte & 0xF0) == 0x90 ||
+					(status_byte & 0xF0) == 0xB0) { // Note On
 					unsigned char note_number = data_byte1;
 					unsigned char velocity = data_byte2;
 
@@ -111,24 +112,27 @@ int main(int argc, char *argv[]) {
 
 					if (velocity > 0) { // Tasto premuto
 
-						printf("%i\n", (data_byte1 >> 1) / 8);
-						printf("%i\n", (data_byte1) % 8);
+						int y = (data_byte1 >> 1) / 8;
+						int x = (data_byte1) % 8;
+
+						cells[y][x] = !cells[y][x];
 						debug_cells();
 
 						// Accendi il LED corrispondente al tasto premuto
 						// Esempio: stesso numero di nota, velocity 0x7F
-						// (massima luminosità, colore standard) Il valore di
-						// velocity per i LED varia tra i modelli di Launchpad.
-						// 0x0C (verde basso), 0x3C (verde pieno), 0x0D (rosso
-						// basso), ecc. Per semplicità, usiamo una velocity
-						// fissa (es. 0x7F o un colore specifico)
-						output_buffer[0] =
-							(status_byte & 0xF0);
-								  // messaggio ricevuto)
+						// (massima luminosità, colore standard) Il valore
+						// di velocity per i LED varia tra i modelli di
+						// Launchpad. 0x0C (verde basso), 0x3C (verde
+						// pieno), 0x0D (rosso basso), ecc. Per semplicità,
+						// usiamo una velocity fissa (es. 0x7F o un colore
+						// specifico)
+
+						output_buffer[0] = (status_byte & 0xF0);
+						// messaggio ricevuto)
 						output_buffer[1] =
 							note_number; // Stessa nota del tasto premuto
 						output_buffer[2] =
-							0x0E; // Esempio: LED verde acceso (controlla il
+							(cells[y][x]) ? 0x0E : 0x00; // Esempio: LED verde acceso (controlla il
 								  // manuale del tuo Launchpad per i valori di
 								  // velocity/colore)
 
@@ -150,22 +154,22 @@ int main(int argc, char *argv[]) {
 						}
 					} else { // Tasto rilasciato (Note On con velocity 0 è
 							 // spesso un Note Off)
-						// Spegni il LED corrispondente
-						output_buffer[0] = (status_byte & 0xF0);
-						output_buffer[1] = note_number; // Stessa nota
-						output_buffer[2] = 0x00; // Velocity 0 (LED spento)
+							 // Spegni il LED corrispondente
+							 // output_buffer[0] = (status_byte & 0xF0);
+							 // output_buffer[1] = note_number; // Stessa nota
+						// output_buffer[2] = 0x00; // Velocity 0 (LED spento)
 
-						// printf("    Invio MIDI Out (LED OFF): %02X %02X
-						// %02X\n", 	   output_buffer[0], output_buffer[1],
-						// 	   output_buffer[2]);
+						// // printf("    Invio MIDI Out (LED OFF): %02X %02X
+						// // %02X\n", 	   output_buffer[0], output_buffer[1],
+						// // 	   output_buffer[2]);
 
-						if ((err = snd_rawmidi_write(midi_out, output_buffer,
-													 3)) < 0) {
-							fprintf(stderr,
-									"Errore durante l'invio del messaggio MIDI "
-									"(LED OFF): %s\n",
-									snd_strerror(err));
-						}
+						// if ((err = snd_rawmidi_write(midi_out, output_buffer,
+						// 							 3)) < 0) {
+						// 	fprintf(stderr,
+						// 			"Errore durante l'invio del messaggio MIDI "
+						// 			"(LED OFF): %s\n",
+						// 			snd_strerror(err));
+						// }
 					}
 					i += 3; // Avanza al prossimo messaggio MIDI (assumendo
 							// messaggi da 3 byte)
