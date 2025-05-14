@@ -1,11 +1,22 @@
 .PHONY: restart main watch
 
+main:
+	gcc main.c -o midi_listener -lasound
+
+install:
+	mkdir -p ~/.local/bin
+	cp midi_listener ~/.local/bin
+
 restart:
 	make main
 	./midi_listener hw:2,0,0
 
-main:
-	gcc main.c -o midi_listener -lasound
-
 watch:
 	find . -name '*.c' -o -name '*.h' | entr -rz make restart
+
+systemd-reload:
+	make
+	systemctl --user stop launchpad-daemon.service
+	make install
+	systemctl --user daemon-reload
+	systemctl --user restart launchpad-daemon.service

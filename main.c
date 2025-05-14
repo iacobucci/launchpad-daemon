@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // Funzione per stampare l'errore ALSA e uscire
@@ -15,6 +16,42 @@ int cells[8][8] = {{0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0},
 				   {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0},
 				   {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}};
 
+#define coords(x, y) (y + x * y)
+
+void hue(float x) {
+	int pid = fork();
+
+	char s[10];
+
+	if (x == 0) {
+		sprintf(s, "0");
+	} else {
+		sprintf(s, "%f", x);
+	}
+
+	if (pid == 0) {
+		execl("/home/valerio/script/hue", "hue", s, NULL);
+	}
+
+	wait(NULL);
+}
+
+void scripts(int x, int y) {
+	switch (coords(x, y)) {
+	case coords(0, 0):
+		if (cells[y][x] == 0) {
+			hue(1);
+			printf("hue 1\n");
+		} else {
+			hue(0);
+			printf("hue 0\n");
+		}
+		break;
+	case coords(0, 1):
+		hue(0.25);
+	}
+}
+
 void debug_cells() {
 	for (int y = 0; y < 8; y++) {
 		for (int x = 0; x < 8; x++) {
@@ -25,7 +62,87 @@ void debug_cells() {
 	printf("\n");
 }
 
+#define BUFFER_SIZE 1024
+
+char *get_amidi_result() {
+	int fd[2];
+	if (pipe(fd) == -1) {
+		perror("pipe failed");
+		return NULL;
+	}
+
+	int pid = fork();
+
+	if (pid == -1) {
+		perror("fork failed");
+		return NULL;
+	}
+
+	if (pid == 0) {
+		// Figlio
+		close(fd[0]); // Chiudi lettura
+
+		// Redirigi stdout sulla pipe
+		close(STDOUT_FILENO);		// close(1)
+		dup2(fd[1], STDOUT_FILENO); // dup su 1
+		close(fd[1]);				// chiudi duplicato
+
+		execl("/usr/bin/amidi", "amidi", "-l", (char *)NULL);
+		perror("execl failed");
+		_exit(1);
+	} else {
+		// Padre
+		close(fd[1]); // Chiudi scrittura
+
+		char *output = malloc(BUFFER_SIZE);
+		if (!output) {
+			perror("malloc failed");
+			return NULL;
+		}
+		output[0] = '\0'; // stringa vuota
+
+		char temp[256];
+		ssize_t count;
+		size_t total_len = 0;
+
+		while ((count = read(fd[0], temp, sizeof(temp) - 1)) > 0) {
+			temp[count] = '\0';
+
+			// Verifica se serve più memoria
+			if (total_len + count + 1 >= BUFFER_SIZE) {
+				// Puoi usare realloc dinamica, ma per ora evitiamo
+				fprintf(stderr, "Output troppo grande per buffer\n");
+				break;
+			}
+
+			strcat(output, temp);
+			total_len += count;
+		}
+
+		close(fd[0]);
+		wait(NULL);
+
+		return output;
+	}
+}
+
+char *get_midi_address() {
+	char *s = get_amidi_result();
+
+	char *line = strtok(s, "\n");
+
+	while (line != NULL) {
+		printf("%s", line);
+		line = strtok(NULL, "\n");
+	}
+}
+
 int main(int argc, char *argv[]) {
+	// get_midi_address();
+
+	// while (1) {
+	// }
+
 	if (argc < 2) {
 		fprintf(stderr, "Utilizzo: %s <nome_porta_input/output_alsa>\n",
 				argv[0]);
@@ -83,10 +200,10 @@ int main(int argc, char *argv[]) {
 		if (n_read_bytes > 0) {
 			// printf("Ricevuti %zd byte(s): ", n_read_bytes);
 
-			for (ssize_t i = 0; i < n_read_bytes; ++i) {
-				printf("%02X ", input_buffer[i]);
-			}
-			printf("\n");
+			// for (ssize_t i = 0; i < n_read_bytes; ++i) {
+			// 	printf("%02X ", input_buffer[i]);
+			// }
+			// printf("\n");
 
 			// Processa solo messaggi MIDI completi (solitamente 3 byte per Note
 			// On/Off) Questo è un parsing MOLTO basilare. Un vero parser MIDI è
@@ -105,40 +222,21 @@ int main(int argc, char *argv[]) {
 					unsigned char note_number = data_byte1;
 					unsigned char velocity = data_byte2;
 
-					// printf("  -> Note On: Nota=%02X (%d), Vel=%02X (%d), "
-					// 	   "Canale=%d\n",
-					// 	   note_number, note_number, velocity, velocity,
-					// 	   status_byte & 0x0F);
-
 					if (velocity > 0) { // Tasto premuto
 
 						int y = (data_byte1 >> 1) / 8;
 						int x = (data_byte1) % 8;
 
 						cells[y][x] = !cells[y][x];
-						debug_cells();
-
-						// Accendi il LED corrispondente al tasto premuto
-						// Esempio: stesso numero di nota, velocity 0x7F
-						// (massima luminosità, colore standard) Il valore
-						// di velocity per i LED varia tra i modelli di
-						// Launchpad. 0x0C (verde basso), 0x3C (verde
-						// pieno), 0x0D (rosso basso), ecc. Per semplicità,
-						// usiamo una velocity fissa (es. 0x7F o un colore
-						// specifico)
 
 						output_buffer[0] = (status_byte & 0xF0);
 						// messaggio ricevuto)
 						output_buffer[1] =
 							note_number; // Stessa nota del tasto premuto
-						output_buffer[2] =
-							(cells[y][x]) ? 0x0E : 0x00; // Esempio: LED verde acceso (controlla il
-								  // manuale del tuo Launchpad per i valori di
-								  // velocity/colore)
-
-						// printf("    Invio MIDI Out: %02X %02X %02X\n",
-						// 	   output_buffer[0], output_buffer[1],
-						// 	   output_buffer[2]);
+						output_buffer[2] = 0x0E;
+						// (cells[y][x])
+						// 	? 0x0E
+						// 	: 0x00; // switch
 
 						if ((err = snd_rawmidi_write(midi_out, output_buffer,
 													 3)) < 0) {
@@ -152,58 +250,32 @@ int main(int argc, char *argv[]) {
 								"Errore: Inviati solo %d byte invece di 3\n",
 								err);
 						}
+
+						scripts(x, y);
+
+						// debug_cells();
 					} else { // Tasto rilasciato (Note On con velocity 0 è
-							 // spesso un Note Off)
-							 // Spegni il LED corrispondente
-							 // output_buffer[0] = (status_byte & 0xF0);
-							 // output_buffer[1] = note_number; // Stessa nota
-						// output_buffer[2] = 0x00; // Velocity 0 (LED spento)
+						// spesso un Note Off)
+						// Spegni il LED corrispondente
+						output_buffer[0] = (status_byte & 0xF0);
+						output_buffer[1] = note_number; // Stessa nota
+						output_buffer[2] = 0x00; // Velocity 0 (LED spento)
 
 						// // printf("    Invio MIDI Out (LED OFF): %02X %02X
 						// // %02X\n", 	   output_buffer[0], output_buffer[1],
 						// // 	   output_buffer[2]);
 
-						// if ((err = snd_rawmidi_write(midi_out, output_buffer,
-						// 							 3)) < 0) {
-						// 	fprintf(stderr,
-						// 			"Errore durante l'invio del messaggio MIDI "
-						// 			"(LED OFF): %s\n",
-						// 			snd_strerror(err));
-						// }
+						if ((err = snd_rawmidi_write(midi_out, output_buffer,
+													 3)) < 0) {
+							fprintf(stderr,
+									"Errore durante l'invio del messaggio MIDI "
+									"(LED OFF): %s\n",
+									snd_strerror(err));
+						}
 					}
 					i += 3; // Avanza al prossimo messaggio MIDI (assumendo
 							// messaggi da 3 byte)
-				} else if ((status_byte & 0xF0) == 0x80) { // Note Off (0x8n)
-					unsigned char note_number = data_byte1;
-					// unsigned char velocity = data_byte2; // Spesso 0x00 o
-					// 0x40 per Note Off
-
-					// printf("  -> Note Off: Nota=%02X (%d), Canale=%d\n",
-					// 	   note_number, note_number, status_byte & 0x0F);
-
-					// Spegni il LED corrispondente
-					output_buffer[0] =
-						0x90; // Usa Note On con velocity 0 per spegnere, per
-							  // coerenza con Launchpad
-					output_buffer[1] = note_number;
-					output_buffer[2] = 0x00; // Velocity 0 (LED spento)
-
-					// printf("    Invio MIDI Out (LED OFF): %02X %02X %02X\n",
-					// 	   output_buffer[0], output_buffer[1],
-					// 	   output_buffer[2]);
-
-					if ((err = snd_rawmidi_write(midi_out, output_buffer, 3)) <
-						0) {
-						fprintf(stderr,
-								"Errore durante l'invio del messaggio MIDI "
-								"(LED OFF): %s\n",
-								snd_strerror(err));
-					}
-					i += 3;
-				}
-				// Aggiungere qui il parsing per altri tipi di messaggi MIDI se
-				// necessario
-				else {
+				} else {
 					// Messaggio non gestito o frammento, avanza di 1 byte e
 					// riprova Un parser robusto gestirebbe lo "stato corrente"
 					// MIDI.
