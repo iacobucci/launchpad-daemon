@@ -1,7 +1,7 @@
 .PHONY: restart main watch
 
 main:
-	gcc main.c -o midi_listener -lasound
+	gcc main.c -o midi_listener -lasound -lcjson -lm
 
 install:
 	mkdir -p ~/.local/bin

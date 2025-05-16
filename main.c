@@ -1,9 +1,11 @@
 #include <alsa/asoundlib.h>
+#include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <math.h>
 
 // Funzione per stampare l'errore ALSA e uscire
 void handle_alsa_error(const char *msg, int err) {
@@ -36,19 +38,90 @@ void hue(float x) {
 	wait(NULL);
 }
 
+struct status {
+	int connected;
+	int power;
+	float brightness;
+};
+
+int parse_status(const char *json_str, struct status *s) {
+	cJSON *json = cJSON_Parse(json_str);
+
+	if (json == NULL)
+		return -1;
+
+	cJSON *connected = cJSON_GetObjectItemCaseSensitive(json, "connected");
+	cJSON *power = cJSON_GetObjectItemCaseSensitive(json, "power");
+	cJSON *brightness = cJSON_GetObjectItemCaseSensitive(json, "brightness");
+
+	if (!cJSON_IsBool(connected) || !cJSON_IsBool(power) ||
+		!cJSON_IsNumber(brightness)) {
+		cJSON_Delete(json);
+		return -1;
+	}
+
+	s->connected = cJSON_IsTrue(connected);
+	s->power = cJSON_IsTrue(power);
+	s->brightness = (float)brightness->valuedouble;
+
+	cJSON_Delete(json);
+	return 0;
+}
+
+struct status get_status() {
+	char buffer[1024];
+
+	FILE *fp = popen("hue status", "r");
+
+	if (fp == NULL) {
+		perror("popen failed");
+		exit(1);
+	}
+
+	fread(buffer, sizeof(char), sizeof(buffer) - 1, fp);
+	pclose(fp);
+	buffer[sizeof(buffer) - 1] = '\0';
+
+	struct status s;
+	if (parse_status(buffer, &s) == 0) {
+		printf("Connected: %d\nPower: %d\nBrightness: %.2f\n", s.connected,
+			   s.power, s.brightness);
+	} else {
+		fprintf(stderr, "Failed to parse JSON\n");
+		s.connected = 0;
+		s.power = 0;
+		s.brightness = 0;
+		return s;
+	}
+	return s;
+}
+
+int small_dist(float x, float y) {
+	float q = fabsf(x - y);
+	return (q <= 0.05);
+}
+
+void hue_or_power_off(float x) {
+	struct status s = get_status();
+	if (small_dist(x, s.brightness)) {
+		if (s.power)
+			hue(0);
+		else {
+			hue(x);
+		}
+	} else {
+		hue(x);
+	}
+}
+
 void scripts(int x, int y) {
 	switch (coords(x, y)) {
 	case coords(0, 0):
-		if (cells[y][x] == 0) {
-			hue(1);
-			printf("hue 1\n");
-		} else {
-			hue(0);
-			printf("hue 0\n");
-		}
+		hue_or_power_off(1);
 		break;
 	case coords(0, 1):
-		hue(0.25);
+		hue_or_power_off(0.25);
+		break;
 	}
 }
 
@@ -138,11 +211,6 @@ char *get_midi_address() {
 }
 
 int main(int argc, char *argv[]) {
-	// get_midi_address();
-
-	// while (1) {
-	// }
-
 	if (argc < 2) {
 		fprintf(stderr, "Utilizzo: %s <nome_porta_input/output_alsa>\n",
 				argv[0]);
