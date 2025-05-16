@@ -7,7 +7,6 @@
 #include <unistd.h>
 #include <math.h>
 
-// Funzione per stampare l'errore ALSA e uscire
 void handle_alsa_error(const char *msg, int err) {
 	fprintf(stderr, "%s: %s\n", msg, snd_strerror(err));
 	exit(EXIT_FAILURE);
@@ -136,79 +135,6 @@ void debug_cells() {
 }
 
 #define BUFFER_SIZE 1024
-
-char *get_amidi_result() {
-	int fd[2];
-	if (pipe(fd) == -1) {
-		perror("pipe failed");
-		return NULL;
-	}
-
-	int pid = fork();
-
-	if (pid == -1) {
-		perror("fork failed");
-		return NULL;
-	}
-
-	if (pid == 0) {
-		// Figlio
-		close(fd[0]); // Chiudi lettura
-
-		// Redirigi stdout sulla pipe
-		close(STDOUT_FILENO);		// close(1)
-		dup2(fd[1], STDOUT_FILENO); // dup su 1
-		close(fd[1]);				// chiudi duplicato
-
-		execl("/usr/bin/amidi", "amidi", "-l", (char *)NULL);
-		perror("execl failed");
-		_exit(1);
-	} else {
-		// Padre
-		close(fd[1]); // Chiudi scrittura
-
-		char *output = malloc(BUFFER_SIZE);
-		if (!output) {
-			perror("malloc failed");
-			return NULL;
-		}
-		output[0] = '\0'; // stringa vuota
-
-		char temp[256];
-		ssize_t count;
-		size_t total_len = 0;
-
-		while ((count = read(fd[0], temp, sizeof(temp) - 1)) > 0) {
-			temp[count] = '\0';
-
-			// Verifica se serve più memoria
-			if (total_len + count + 1 >= BUFFER_SIZE) {
-				// Puoi usare realloc dinamica, ma per ora evitiamo
-				fprintf(stderr, "Output troppo grande per buffer\n");
-				break;
-			}
-
-			strcat(output, temp);
-			total_len += count;
-		}
-
-		close(fd[0]);
-		wait(NULL);
-
-		return output;
-	}
-}
-
-char *get_midi_address() {
-	char *s = get_amidi_result();
-
-	char *line = strtok(s, "\n");
-
-	while (line != NULL) {
-		printf("%s", line);
-		line = strtok(NULL, "\n");
-	}
-}
 
 int main(int argc, char *argv[]) {
 	if (argc < 2) {
