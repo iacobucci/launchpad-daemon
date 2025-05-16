@@ -1,11 +1,11 @@
 #include <alsa/asoundlib.h>
 #include <cjson/cJSON.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <math.h>
 
 void handle_alsa_error(const char *msg, int err) {
 	fprintf(stderr, "%s: %s\n", msg, snd_strerror(err));
@@ -153,28 +153,21 @@ int main(int argc, char *argv[]) {
 	snd_rawmidi_t *midi_out = NULL;
 	int err;
 
-	// Apri la porta MIDI di input
 	if ((err = snd_rawmidi_open(&midi_in, NULL, input_port_name,
 								SND_RAWMIDI_NONBLOCK)) < 0) {
 		handle_alsa_error("Impossibile aprire la porta MIDI di input", err);
 	}
 
-	// Apri la porta MIDI di output
-	// Nota: SND_RAWMIDI_SYNC apre in modalità bloccante per l'output, che
-	// spesso è OK. Potresti usare SND_RAWMIDI_NONBLOCK anche qui se necessario,
-	// ma la gestione degli errori di scrittura diventa più complessa.
-	if ((err = snd_rawmidi_open(NULL, &midi_out, output_port_name, 0)) <
-		0) {						// 0 per modalità bloccante di default
-		snd_rawmidi_close(midi_in); // Chiudi l'input se l'output fallisce
+	if ((err = snd_rawmidi_open(NULL, &midi_out, output_port_name, 0)) < 0) {
+		snd_rawmidi_close(midi_in);
 		handle_alsa_error("Impossibile aprire la porta MIDI di output", err);
 	}
 
 	printf("In ascolto su input: %s, Output su: %s. Premi Ctrl+C per uscire.\n",
 		   input_port_name, output_port_name);
 
-	unsigned char input_buffer[32]; // Buffer per i dati MIDI in input
-	unsigned char output_buffer[3]; // Buffer per i dati MIDI in output (es.
-									// Note On: 3 byte)
+	unsigned char input_buffer[32];
+	unsigned char output_buffer[3];
 	ssize_t n_read_bytes;
 
 	while (1) {
@@ -192,16 +185,12 @@ int main(int argc, char *argv[]) {
 		}
 
 		if (n_read_bytes > 0) {
-			// printf("Ricevuti %zd byte(s): ", n_read_bytes);
 
 			// for (ssize_t i = 0; i < n_read_bytes; ++i) {
 			// 	printf("%02X ", input_buffer[i]);
 			// }
 			// printf("\n");
 
-			// Processa solo messaggi MIDI completi (solitamente 3 byte per Note
-			// On/Off) Questo è un parsing MOLTO basilare. Un vero parser MIDI è
-			// più complesso.
 			for (ssize_t i = 0; (i + 2) < n_read_bytes;) {
 				unsigned char status_byte = input_buffer[i];
 				unsigned char data_byte1 = input_buffer[i + 1];
