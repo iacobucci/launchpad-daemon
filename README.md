@@ -9,7 +9,7 @@ It uses [ALSA development libs](https://archlinux.org/packages/extra/x86_64/alsa
 Description=Novation Launchpad daemon
 
 [Service]
-ExecStart=/home/valerio/.local/bin/midi_listener hw:2,0,0
+ExecStart=/home/valerio/.local/bin/midi_listener
 Restart=always
 RestartSec=10
 
