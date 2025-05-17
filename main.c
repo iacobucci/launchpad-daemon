@@ -134,20 +134,62 @@ void debug_cells() {
 	printf("\n");
 }
 
-#define BUFFER_SIZE 1024
+int find_launchpad(char *launchpad_id, size_t id_size) {
+	int card = -1;
 
-int main(int argc, char *argv[]) {
-	if (argc < 2) {
-		fprintf(stderr, "Utilizzo: %s <nome_porta_input/output_alsa>\n",
-				argv[0]);
-		fprintf(stderr, "Esempio: %s hw:1,0,0\n", argv[0]);
-		fprintf(stderr,
-				"Usa 'amidi -l' per elencare le porte MIDI disponibili.\n");
+	if (snd_card_next(&card) < 0 || card < 0) {
+		fprintf(stderr, "Nessuna scheda audio trovata\n");
 		return 1;
 	}
 
-	const char *input_port_name = argv[1];
-	const char *output_port_name = argv[1];
+	while (card >= 0) {
+		snd_ctl_t *ctl;
+		char ctl_name[32];
+		sprintf(ctl_name, "hw:%d", card);
+
+		if (snd_ctl_open(&ctl, ctl_name, 0) < 0) {
+			snd_card_next(&card);
+			continue;
+		}
+
+		int device = -1;
+		while (snd_ctl_rawmidi_next_device(ctl, &device) >= 0 && device >= 0) {
+			snd_rawmidi_info_t *info;
+			snd_rawmidi_info_alloca(&info);
+
+			snd_rawmidi_info_set_device(info, device);
+			snd_rawmidi_info_set_stream(info, SND_RAWMIDI_STREAM_OUTPUT);
+			snd_rawmidi_info_set_subdevice(info, 0);
+
+			if (snd_ctl_rawmidi_info(ctl, info) >= 0) {
+				const char *name = snd_rawmidi_info_get_name(info);
+				if (name && strstr(name, "Launchpad Mini")) {
+					snprintf(launchpad_id, id_size, "hw:%d,%d", card, device);
+					snd_ctl_close(ctl);
+					return 0;
+				}
+			}
+		}
+
+		snd_ctl_close(ctl);
+		snd_card_next(&card);
+	}
+
+	return 1;
+}
+
+#define BUFFER_SIZE 1024
+
+int main(int argc, char *argv[]) {
+	char id[32];
+
+	if (find_launchpad(id, sizeof(id))) {
+		printf("cant find launchpad");
+		return 1;
+	}
+
+	const char *input_port_name = id;
+	const char *output_port_name = id;
 
 	snd_rawmidi_t *midi_in = NULL;
 	snd_rawmidi_t *midi_out = NULL;
